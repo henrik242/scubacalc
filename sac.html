@@ -1,0 +1,364 @@
+<html><head>
+<title>UNFINISHED Surface air consumption (SAC) calculator</title>
+<meta charset='utf-8'>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>  
+<script type="text/javascript">
+"use strict";
+
+var lastunit = 'metric';
+
+var elem = function(id) {
+  return document.getElementById(id);
+}
+
+var toDec = function(num, four) {
+  if (isNaN(num) || !isFinite(num)) return 0;
+  if (four) {
+    if (num.toFixed(4).substr(-1) != "0") return num.toFixed(3); 
+    if (num.toFixed(3).substr(-1) != "0") return num.toFixed(2); 
+    if (num.toFixed(2).substr(-1) != "0") return num.toFixed(1); 
+  }
+  if (num.toFixed(1).substr(-1) == "0") return num.toFixed(0); 
+  return num.toFixed(1);
+}
+
+var valid = function(val) {
+  if (val.value.substr(-1) == "\." || val.value.substr(-1) == "," || val.value.length == 0) return false;
+  return true;
+}
+
+var parse = function(elem) {
+  var parsed = parseFloat(elem.value.replace(",",".").replace(/[^0-9.]/, ""));
+  if (isNaN(parsed) || parsed.length == 0) return 0;
+  return parsed;
+}
+
+var setval = function(elem, val) {
+  if (elem.value !== toDec(val)) {
+    elem.value = toDec(val);
+  }
+}
+
+var LBS_PER_KG = 2.20462;
+var BAR_PER_PSI = 0.06895;
+var STEEL_DENSITY = 7.85;    // kg/litre
+var STEEL_DENSITY_IMP = 490; // lb/cuft
+var ALU_DENSITY = 2.72;      // kg/litre
+var ALU_DENSITY_IMP = 170;   // lb/cuft
+var AIR_DENSITY = 0.001225;  // kg/litre
+var AIR_DENSITY_IMP = 0.07647; // lb/cuft
+var LITERS_PER_CUFT = 28.31685;
+var PSI_PER_ATM = 14.6959;
+var SALT_DENSITY = 1.03;      // kg/litre
+var SALT_DENSITY_IMP = 64;    // lb/cuft
+var FRESH_DENSITY = 1;        // kg/litre
+var FRESH_DENSITY_IMP = 62.4; // lb/cuft
+
+var update = function(unit, message) {
+  if (unit) {
+    lastunit = unit;
+  } else {
+    unit = lastunit;
+  }
+  if (message) {
+    elem("message").style.display = "block";
+  } else {
+    elem("message").style.display = "none";
+  }
+  var cuftElem = elem("cuft");
+  var psiElem = elem("psi");
+  var barElem = elem("bar");
+  var litresElem = elem("litres");
+  var kgElem = elem("kg");
+  var lbsElem = elem("lbs");
+
+  if (!(valid(cuftElem) && valid(psiElem) && valid(barElem) && valid(litresElem) && valid(kgElem) && valid(lbsElem))) {
+    return;
+  }
+
+  var cuft = parse(cuftElem);
+  var psi = parse(psiElem);
+  var bar = parse(barElem);
+  var litres = parse(litresElem);  
+  var kg = parse(kgElem);
+  var lbs = parse(lbsElem);  
+
+  if (unit === 'metric') {
+    cuft = ( litres / LITERS_PER_CUFT ) * bar;
+    psi = bar / BAR_PER_PSI;
+    lbs = kg * LBS_PER_KG;
+  } else {
+    litres = ( cuft / ( psi * BAR_PER_PSI ) ) * LITERS_PER_CUFT;
+    bar = psi * BAR_PER_PSI;
+    kg = lbs / LBS_PER_KG;
+  }
+
+  setval(cuftElem, cuft);
+  setval(psiElem, psi);
+  setval(barElem, bar);
+  setval(litresElem, litres);
+  setval(kgElem, kg);
+  setval(lbsElem, lbs);
+  
+  if (unit === 'metric') {
+    window.location.hash = subst("#kg={0}&litres={1}&bar={2}&salt={3}&alu={4}&valve={5}&doubles={6}", 
+      [kg, litres, bar, elem("salt").checked, elem("alu").checked, elem("valve").checked, elem("doubles").checked]);   
+
+    buoyancy_metric(kg, litres, bar);
+  } else {
+    window.location.hash = subst("#lbs={0}&cuft={1}&psi={2}&salt={3}&alu={4}&valve={5}&doubles={6}", 
+      [lbs, cuft, psi, elem("salt").checked, elem("alu").checked, elem("valve").checked, elem("doubles").checked]);   
+
+    buoyancy_imperial(lbs, cuft, psi);
+  }
+};
+
+var buoyancy_metric = function(kg, litres, bar) {
+
+    var metal = elem("alu").checked ? ALU_DENSITY : STEEL_DENSITY;
+    var water =  elem("salt").checked ? SALT_DENSITY : FRESH_DENSITY;
+    var valve = elem("valve").checked ? 0.68 : 0;
+    if (elem("doubles").checked) {
+       valve = valve * 3.7;
+       litres = litres * 2;
+       kg = kg * 2;
+    }
+    var volmetal = kg/metal;
+    var volvalve = valve / STEEL_DENSITY;
+    var volume = (volmetal + volvalve + litres) * water;
+    var air = AIR_DENSITY * bar * litres;
+    var empty = volume - kg - valve;
+    var full = volume - kg - valve - air;
+
+    elem("fullempty").value = toDec(empty) + "/" + toDec(full);
+    elem("fullemptylbs").value = toDec(empty * LBS_PER_KG) + "/" + toDec(full * LBS_PER_KG);
+
+    var txt = subst("<br><br>Steel has a density of {0} kg/litre", [STEEL_DENSITY]);
+    if (metal !== STEEL_DENSITY) {
+       txt += subst(", and aluminium is {0} kg/litre", [ALU_DENSITY]);
+    }
+    txt += subst("<br>The volume of the tank metal is {0} kg / {1} = <b>{2} litres</b><br>", [kg, metal, toDec(volmetal,1)]);
+    var plusvalve = "";
+    var minusvalve = "";
+    if (valve !== 0) {
+      txt += subst("The volume of the valve is {0} kg / {1} = <b>{2} litres</b><br>", [toDec(valve, 1), STEEL_DENSITY, toDec(volvalve,1)]);
+      plusvalve = " + " + toDec(volvalve, 1);
+      minusvalve = " - " + toDec(valve, 1);    
+    } 
+    if (water === SALT_DENSITY) {
+       txt += subst("The density of salt water is {0} kg/litre<br>", [SALT_DENSITY]);
+    } else {
+       txt += subst("The density of fresh water is {0} kg/litre<br>", [FRESH_DENSITY]);
+    }
+    txt += subst("Total weight in water: ({0} + {1} {2}) x {3} = <b>{4} kg</b><br>", [litres, toDec(volmetal,1), plusvalve, water, toDec(volume,1)])
+       + subst("Air has a density of {0} kg/litre. <br>The air in a full tank weighs {1} x {2} litres x {3} bar = <b>{4} kg</b><br>", [AIR_DENSITY, AIR_DENSITY, litres, bar, toDec(air,1)])
+       + subst("Tank buoyancy when empty: {0} - {1} {2} = <b>{3} kg</b><br>", [toDec(volume,1), kg, minusvalve, toDec(empty)])
+       + subst("Tank buoyancy when full: {0} - {1} {2} - {3} = <b>{4} kg</b><br>", [toDec(volume,1), kg, minusvalve, toDec(air,1), toDec(full)]);
+
+    elem("calculation").innerHTML = txt;
+};
+
+var buoyancy_imperial = function(lbs, cuft, psi) {
+
+    var metal = elem("alu").checked ? ALU_DENSITY_IMP : STEEL_DENSITY_IMP;
+    var water =  elem("salt").checked ? SALT_DENSITY_IMP : FRESH_DENSITY_IMP;
+    var valve = elem("valve").checked ? 1.5 : 0;
+ 
+    if (elem("doubles").checked) {
+       valve = valve * 3.7;
+       cuft = cuft * 2;
+       lbs = lbs * 2;
+    }
+    var volinner = (cuft / psi * PSI_PER_ATM);
+    var volmetal = lbs / metal;
+    var volvalve =  valve / STEEL_DENSITY_IMP;
+    var volume = (volinner + volmetal + volvalve) * water;
+    var air = AIR_DENSITY_IMP * cuft;
+    var empty = volume - lbs - valve;
+    var full = volume - lbs - valve - air;
+
+    elem("fullempty").value = toDec(empty / LBS_PER_KG) + "/" + toDec(full / LBS_PER_KG);
+    elem("fullemptylbs").value = toDec(empty) + "/" + toDec(full);
+
+    var txt = subst("<br><br>Air has a pressure of {0} psi at 1 ATM.<br> Tank inner volume is {1} cuft / {2} psi x {3} = <b>{4} cuft</b><br>", [PSI_PER_ATM, cuft, psi, PSI_PER_ATM, toDec(volinner,1)])
+       + subst("Steel has a density of {0} lbs/cuft", [STEEL_DENSITY_IMP]);
+    if (metal !== STEEL_DENSITY_IMP) {
+       txt += subst(", and aluminium is {0} lbs/cuft", [ALU_DENSITY_IMP]);
+    } 
+    txt += subst("<br>The volume of the tank metal is {0} lbs / {1} = <b>{2} cuft</b><br>", [lbs, metal, toDec(volmetal,1)]);
+    var plusvalve = "";
+    var minusvalve = "";
+    if (valve !== 0) {
+       txt += subst("The volume of the valve is {0} lbs / {1} = <b>{2} cuft</b><br>", [toDec(valve, 1), STEEL_DENSITY_IMP, toDec(volvalve,1)]);
+       plusvalve = " + " + toDec(volvalve, 1);
+       minusvalve = " - " + toDec(valve, 1);
+    }
+    if (water === SALT_DENSITY_IMP) {
+       txt += subst("The density of salt water is {0} lbs/cuft<br>", [SALT_DENSITY_IMP]);
+    } else {  
+       txt += subst("The density of fresh water is {0} lbs/cuft<br>", [FRESH_DENSITY_IMP]);
+    }
+    txt += subst("Total weight in water: ({0} + {1} {2}) x {3} = <b>{4} lbs</b><br>", [toDec(volinner,1), toDec(volmetal,1), plusvalve, water, toDec(volume,1)])
+       + subst("Air has a density of {0} lbs/cuft. <br>The air in a full tank weighs {1} x {2} cuft = <b>{3} lbs</b><br>", [AIR_DENSITY_IMP, AIR_DENSITY_IMP, cuft, toDec(air,1)])
+       + subst("Tank buoyancy when empty: {0} - {1} {2} = <b>{3} lbs</b><br>", [toDec(volume,1), lbs, minusvalve, toDec(empty)])
+       + subst("Tank buoyancy when full: {0} - {1} {2} - {3} = <b>{4} lbs</b><br>", [toDec(volume,1), lbs, minusvalve, toDec(air,1), toDec(full)]);
+
+    elem("calculation").innerHTML = txt;
+};
+
+var subst = function(str, arr) {
+  var i, pattern, re, n = arr.length; 
+  for (i = 0; i < n; i++) { 
+    pattern = "\\{" + i + "\\}"; 
+    re = new RegExp(pattern, "g"); 
+    str = str.replace(re, arr[i]); 
+  } 
+  return str; 
+}
+
+var showhide = function() {
+  if (elem("calculation").style.display === "inline") {
+    elem("calculation").style.display = "none";
+    elem("showhide").innerHTML = "Show calculation";
+  } else {
+    elem("calculation").style.display = "inline";
+    elem("showhide").innerHTML = "Hide calculation";
+  }
+}
+
+var metric = function(litres, bar, kg, alu, doubles) {
+  elem("bar").value = bar;
+  elem("litres").value = litres;
+  elem("alu").checked = alu === 1 ? true : false;
+  elem("doubles").checked = doubles === 1 ? true : false;
+  elem("kg").value = kg;
+  update('metric', true);
+};
+
+var imperial = function(cuft, psi, lbs, alu, doubles) {
+  elem("cuft").value = cuft;
+  elem("psi").value = psi;
+  elem("alu").checked = alu === 1 ? true : false;
+  elem("doubles").checked = doubles === 1 ? true : false;
+  elem("lbs").value = lbs;
+  update('imperial', true);
+};
+
+var parsehash = function(unit) {
+  var parsed =  window.location.hash.match(new RegExp(unit + "=([0-9.]+)"))[1];
+  if (!isNaN(parsed) && isFinite(parsed)) {
+    elem(unit).value = parsed;
+  }
+}
+
+var parsehashcheckbox = function(unit) {
+  var parsed =  window.location.hash.match(new RegExp(unit + "=([a-z]+)"))[1];
+  elem(unit).checked = parsed === "true";
+}
+
+window.onload = function() {
+  parsehashcheckbox("salt");
+  parsehashcheckbox("alu");
+  parsehashcheckbox("valve");
+  parsehashcheckbox("doubles");
+  if (window.location.hash.match(/lbs/)) {
+    parsehash("lbs");
+    parsehash("psi");
+    parsehash("cuft");
+    update("imperial");
+  } else {
+    parsehash("kg");
+    parsehash("bar");
+    parsehash("litres");
+    update('metric');
+  }
+};
+</script>
+<style>
+body {
+  font-family: Arial, Helvetica, sans-serif;
+}
+span, th {
+  white-space:nowrap;
+}
+input, td {
+  text-align: center;
+  font-size: 1.2em;
+  border-radius: 5px;
+}
+input.button {
+  background-color: #EEE;
+  font-size: 1.0em;
+  font-weight: normal;
+}
+th, .small {
+  font-size: 0.8em;
+  font-weight: normal;
+}
+table {
+  width: 400px;
+}
+b {
+  color: blue;
+  font-weight: normal;
+}
+#calculation, #message {
+  display: none;
+}
+#message {
+  font-size: 0.7em;
+  color: red;
+  padding-bottom: 10px;
+}
+#fullempty, #fullemptylbs {
+  border: none;
+  font-size: 1.1em;
+}
+.check {
+  background-color: #EEE;
+  padding: 1px 6px 2px 2px;
+  margin: 2px;
+  font-size: 0.8em;
+  font-weight: normal;
+  border-radius: 5px;
+}
+#checkboxes {
+  margin: 10px 1px 15px 1px;
+}
+</style>
+</head>
+<body>
+<form>
+<table><tr>
+<td colspan=4>Surface air consumption (SAC) calculator</td>
+</tr><td><br></td><tr>
+<th title="Tank size in litres">litres</th><th title="Start pressure in bar">start bar</th><th title="End pressure in bar">end bar</th>
+<th title="Average depth in meters">avg depth (m)</th>
+</tr><tr>
+<td><input size=5 class=right id=litres onKeyUp="update('metric')" value=0 title="Tank size in litres"></td>
+<td><input size=6 class=right id=startbar onKeyUp="update('metric')" value=0 title="Start pressure in bar"></td>
+<td><input size=4 class=right id=endbar onKeyUp="update('metric')" value=0 title="End pressure in bar"></td>
+<td><input size=4 class=right id=avgm onKeyUp="update('metric')"  title="Average depth in meters" value="0"></td>
+</tr><tr>
+<td><input size=5 class=right id=cuft onKeyUp="update('imperial')" value=0 title="Tank size in cubic feet"></td>
+<td><input size=6 class=right id=startpsi onKeyUp="update('imperial')" value=0 title="Start pressure in psi"></td>
+<td><input size=4 class=right id=endpsi onKeyUp="update('imperial')" value=0 title="End pressure in psi"></td>
+<td><input size=4 class=right id=avgft onKeyUp="update('imperial')" title="Average depth in feet" value="0"></td>
+</tr><tr>
+<th title="Tank size in cubic feet">cuft</th><th title="Start pressure in psi">start psi</th><th title="End pressure in psi">end psi</th>
+<th title="Average depth in feet">avg depth (ft)</th>
+</tr>
+<tr><td colspan=4 class=small>
+<a id=showhide onClick="showhide()" href="#">Show calculation</a>
+<div id=calculation></div>
+<br><p>
+This calculator shows your average air consumption when scuba diving.  Low consumption is under 15 litres per minute.  High is above 25. 
+Beginners start around 30-40, and usually consume around 20-25 after some dives.  Under 11 is usually too low. 
+</p>
+<p class=small><a rel="license" href="http://creativecommons.org/licenses/by-sa/3.0/"><img alt="Creative Commons License" style="border-width:0" src="http://i.creativecommons.org/l/by-sa/3.0/80x15.png" /></a><br />This work is licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/3.0/">Creative Commons Attribution-ShareAlike 3.0 Unported License</a>.
+</p></td>
+</tr></table>
+</form>
+</body>
+</html>
+
